@@ -8,7 +8,6 @@ use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_async;
-
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     handle_connection(peer, stream).await; 
 }
@@ -19,9 +18,9 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) {
     println!("New WebSocket connection: {}", peer);
 
     while let Some(msg) = ws_stream.next().await {
-        let msg = msg.unwrap();
+        let msg = msg.unwrap_or(tokio_tungstenite::tungstenite::protocol::Message::Text("".to_string()));
         if msg.is_text() || msg.is_binary() {
-            ws_stream.send(msg).await.unwrap();
+            ws_stream.send(msg).await.unwrap_or_default();
         }
     }
     println!("{} disconnected", peer);
