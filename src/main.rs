@@ -4,15 +4,35 @@ https://docs.rs/tokio-tungstenite/0.15.0/tokio_tungstenite/index.html
 https://github.com/tokio-rs/tokio
 https://tokio.rs/tokio/tutorial/io
 */
+
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_async;
+use tokio::time::{sleep, Duration};
 
 use std::io::{stdin, stdout, Write};
 use std::error::Error;
 
 use midir::{MidiInput, Ignore};
+
+type Clients = String;
+
+#[tokio::main]
+async fn main() {
+    tokio::spawn(midi_routine());
+    sleep(Duration::from_millis(1000)).await;
+    let addr = "127.0.0.1:3012";
+    let listener = TcpListener::bind(&addr).await.expect("Can't listen");
+    println!("Listening on: {}", addr);
+
+    while let Ok((stream, _)) = listener.accept().await {
+        let peer = stream.peer_addr().expect("connected streams should have a peer address");
+        println!("Peer address: {}", peer);
+
+        tokio::spawn(accept_connection(peer, stream));
+    }
+}
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     handle_connection(peer, stream).await; 
@@ -32,20 +52,11 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) {
     println!("{} disconnected", peer);
 }
 
-#[tokio::main]
-async fn main() {
-    tokio::spawn(midi_routine());
-    let addr = "127.0.0.1:3012";
-    let listener = TcpListener::bind(&addr).await.expect("Can't listen");
-    println!("Listening on: {}", addr);
 
-    while let Ok((stream, _)) = listener.accept().await {
-        let peer = stream.peer_addr().expect("connected streams should have a peer address");
-        println!("Peer address: {}", peer);
+fn send_to_all_clients(msg: String, client: &Clients){
 
-        tokio::spawn(accept_connection(peer, stream));
-    }
 }
+
 enum MidiCommand{
     KeyDown(u8,u8),
     KeyUp(u8,u8),
@@ -97,9 +108,11 @@ fn read_midi() -> Result<(), Box<dyn Error>>{
     };
     
     println!("\nOpening connection");
+
+    let mut piano_char_vec = vec![b'0'; 88];
+    
     let in_port_name = midi_in.port_name(in_port)?;
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
-    let mut piano_char_vec = vec![b'0'; 88];
     let _conn_in = midi_in.connect(in_port, "midir-read-input", move |_stamp, message, _| {
         if message.len() > 1{
             let command = MidiCommand::new(message);
@@ -113,10 +126,12 @@ fn read_midi() -> Result<(), Box<dyn Error>>{
         }
     }, ())?;
     
-    println!("Connection open, reading input from '{}' (press enter to exit) ...", in_port_name);
+    println!("Connection open, reading input from '{}' ", in_port_name);
 
     input.clear();
-    stdin().read_line(&mut input)?; // wait for next enter key press
+    loop {
+        stdin().read_line(&mut input)?; // wait for next enter key press
+    }
 
     println!("Closing connection");
     Ok(())
