@@ -53,14 +53,10 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
 
     println!("New WebSocket connection: {}", addr);
     let mut old_piano_string = piano_string.lock().unwrap().clone();
-    let mut stay = true;
-    while stay{
+    loop {
         let current_piano_string = piano_string.lock().unwrap().clone();
         if old_piano_string != current_piano_string{
-            match ws_stream.send(current_piano_string.clone()).await{
-                Err(_e) => stay = false,
-                _ => (),
-            }
+            ws_stream.send(current_piano_string.clone()).await.unwrap_or_default();
             old_piano_string = current_piano_string;
         }
         sleep(Duration::from_millis(1)).await;
