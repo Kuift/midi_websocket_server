@@ -5,13 +5,11 @@ https://github.com/tokio-rs/tokio
 https://tokio.rs/tokio/tutorial/io
 */
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio::time::{sleep, Duration};
@@ -21,12 +19,11 @@ use std::error::Error;
 
 use midir::{MidiInput, Ignore};
 
-type Tx = UnboundedSender<Message>;
-type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
+type PianoString = Arc<Mutex<Message>>;
 
 #[tokio::main]
 async fn main() {
-    let state = PeerMap::new(Mutex::new(HashMap::new()));
+    let state = PianoString::new(Mutex::new(Message::Text(String::from_utf8(vec![b'0'; 88]).unwrap())));
     
     let midi_task = tokio::spawn(midi_routine(state.clone()));
     sleep(Duration::from_millis(1000)).await;
@@ -47,38 +44,26 @@ async fn main() {
 ************Web socket handling************
 */
 
-async fn accept_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStream) {
-    handle_connection(peer_map, addr, stream).await; 
+async fn accept_connection(piano_string: PianoString, addr: SocketAddr, stream: TcpStream) {
+    handle_connection(piano_string, addr, stream).await; 
 }
 
-async fn handle_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStream) {
+async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: TcpStream) {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
-    let (tx, _rx) = unbounded_channel();
-    peer_map.lock().unwrap().insert(addr, tx);
-
     println!("New WebSocket connection: {}", addr);
-
-    while let Some(msg) = ws_stream.next().await {
-        let msg = msg.unwrap_or(tokio_tungstenite::tungstenite::protocol::Message::Text("".to_string()));
-        if msg.is_text() || msg.is_binary() {
-            ws_stream.send(msg).await.unwrap_or_default();
+    let mut old_piano_string = piano_string.lock().unwrap().clone();
+    loop{
+        let current_piano_string = piano_string.lock().unwrap().clone();
+        if old_piano_string != current_piano_string{
+            ws_stream.send(current_piano_string.clone()).await.unwrap_or_default();
+            old_piano_string = current_piano_string;
         }
+        sleep(Duration::from_millis(1)).await;
     }
     println!("{} disconnected", addr);
-    peer_map.lock().unwrap().remove(&addr);
 }
 
-
-fn server_send_msg_to_all_clients(msg: tokio_tungstenite::tungstenite::Message, peer_map: std::sync::MutexGuard<'_, HashMap<SocketAddr, UnboundedSender<Message>>>){
-    let peers = peer_map;
-
-    let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
-
-    for recp in broadcast_recipients {
-        recp.send(msg.clone()).expect("sending messages failed");
-    }
-}
 
 /*
 *************midi stuff below*************
@@ -100,12 +85,12 @@ impl MidiCommand {
     }
 }
 
-async fn midi_routine(peer_map: PeerMap)
+async fn midi_routine(piano_string: PianoString)
 {
-    read_midi(peer_map).unwrap();
+    read_midi(piano_string).unwrap();
 }
 
-fn read_midi<'a>(peer_map:PeerMap) -> Result<(), Box<dyn Error>>{
+fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
     let mut input = String::new();
     
     let mut midi_in = MidiInput::new("midir reading input")?;
@@ -147,9 +132,9 @@ fn read_midi<'a>(peer_map:PeerMap) -> Result<(), Box<dyn Error>>{
                 MidiCommand::KeyUp(key,_vel) => piano_char_vec[(key-21) as usize] = b'0',
                 _ => ()
             };
-            let piano_string = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
-            println!("{} ; {:?}", piano_string, message);
-            server_send_msg_to_all_clients(tokio_tungstenite::tungstenite::Message::Text(piano_string),peer_map.lock().unwrap());
+            let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
+            //println!("{} ; {:?}", piano_string_from_array, message);
+            *piano_string.lock().unwrap() = Message::Text(piano_string_from_array).clone();
         }
     }, ())?;
     
