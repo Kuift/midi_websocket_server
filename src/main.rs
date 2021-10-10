@@ -57,7 +57,10 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
     while stay{
         let current_piano_string = piano_string.lock().unwrap().clone();
         if old_piano_string != current_piano_string{
-            ws_stream.send(current_piano_string.clone()).await.unwrap_or(stay = false);
+            match ws_stream.send(current_piano_string.clone()).await{
+                Err(_e) => stay = false,
+                _ => (),
+            }
             old_piano_string = current_piano_string;
         }
         sleep(Duration::from_millis(1)).await;
@@ -141,7 +144,7 @@ fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
                 _ => ()
             };
             let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
-            //println!("{} ; {:?}", piano_string_from_array, message);
+            println!("{} ; {:?}", piano_string_from_array, message);
             *piano_string.lock().unwrap() = Message::Text(piano_string_from_array).clone();
         }
     }, ())?;
