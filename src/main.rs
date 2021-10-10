@@ -4,10 +4,14 @@ https://docs.rs/tokio-tungstenite/0.15.0/tokio_tungstenite/index.html
 https://github.com/tokio-rs/tokio
 https://tokio.rs/tokio/tutorial/io
 */
-
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use futures_util::{SinkExt, StreamExt};
-use std::net::SocketAddr;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, windows::named_pipe::PipeMode};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::accept_async;
 use tokio::time::{sleep, Duration};
 
@@ -16,32 +20,43 @@ use std::error::Error;
 
 use midir::{MidiInput, Ignore};
 
-type Clients = String;
+type Tx = UnboundedSender<tokio_tungstenite::tungstenite::Message>;
+type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 
 #[tokio::main]
 async fn main() {
-    tokio::spawn(midi_routine());
+    let state = PeerMap::new(Mutex::new(HashMap::new()));
+    
+    let midiTask = tokio::spawn(midi_routine(state.clone()));
     sleep(Duration::from_millis(1000)).await;
-    let addr = "127.0.0.1:3012";
+    let addr = "localhost:3012";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     println!("Listening on: {}", addr);
 
     while let Ok((stream, _)) = listener.accept().await {
-        let peer = stream.peer_addr().expect("connected streams should have a peer address");
-        println!("Peer address: {}", peer);
+        let addr = stream.peer_addr().expect("connected streams should have a peer address");
+        println!("Peer address: {}", addr);
 
-        tokio::spawn(accept_connection(peer, stream));
+        tokio::spawn(accept_connection(state.clone(),addr, stream));
     }
+    midiTask.abort();
 }
 
-async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
-    handle_connection(peer, stream).await; 
+/*
+************Web socket handling************
+*/
+
+async fn accept_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStream) {
+    handle_connection(peer_map, addr, stream).await; 
 }
 
-async fn handle_connection(peer: SocketAddr, stream: TcpStream) {
+async fn handle_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStream) {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
-    println!("New WebSocket connection: {}", peer);
+    let (tx, rx) = unbounded_channel();
+    peer_map.lock().unwrap().insert(addr, tx);
+
+    println!("New WebSocket connection: {}", addr);
 
     while let Some(msg) = ws_stream.next().await {
         let msg = msg.unwrap_or(tokio_tungstenite::tungstenite::protocol::Message::Text("".to_string()));
@@ -49,14 +64,24 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) {
             ws_stream.send(msg).await.unwrap_or_default();
         }
     }
-    println!("{} disconnected", peer);
+    println!("{} disconnected", addr);
+    peer_map.lock().unwrap().remove(&addr);
 }
 
 
-fn send_to_all_clients(msg: String, client: &Clients){
+fn server_send_msg_to_all_clients(msg: tokio_tungstenite::tungstenite::Message, peer_map: PeerMap){
+    let peers = peer_map.lock().unwrap();
 
+    let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
+
+    for recp in broadcast_recipients {
+        recp.send(msg.clone()).expect("sending messages failed");
+    }
 }
 
+/*
+*************midi stuff below*************
+*/
 enum MidiCommand{
     KeyDown(u8,u8),
     KeyUp(u8,u8),
@@ -74,17 +99,17 @@ impl MidiCommand {
     }
 }
 
-async fn midi_routine()
+async fn midi_routine(peer_map: PeerMap)
 {
-    read_midi().unwrap();
+    read_midi(peer_map).unwrap();
 }
 
-fn read_midi() -> Result<(), Box<dyn Error>>{
+fn read_midi<'a>(peer_map:PeerMap) -> Result<(), Box<dyn Error>>{
     let mut input = String::new();
     
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
-    
+    //TODO: make the port selection part into a separate function
     // Get an input port (read from console if multiple are available)
     let in_ports = midi_in.ports();
     let in_port = match in_ports.len() {
@@ -123,6 +148,7 @@ fn read_midi() -> Result<(), Box<dyn Error>>{
             };
             let piano_string = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
             println!("{} ; {:?}",piano_string , message);
+            server_send_msg_to_all_clients(tokio_tungstenite::tungstenite::Message::Text(piano_string),peer_map.clone());
         }
     }, ())?;
     
