@@ -10,9 +10,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio::net::{TcpListener, TcpStream, windows::named_pipe::PipeMode};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
 use tokio::time::{sleep, Duration};
 
 use std::io::{stdin, stdout, Write};
@@ -20,14 +21,14 @@ use std::error::Error;
 
 use midir::{MidiInput, Ignore};
 
-type Tx = UnboundedSender<tokio_tungstenite::tungstenite::Message>;
+type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 
 #[tokio::main]
 async fn main() {
     let state = PeerMap::new(Mutex::new(HashMap::new()));
     
-    let midiTask = tokio::spawn(midi_routine(state.clone()));
+    let midi_task = tokio::spawn(midi_routine(state.clone()));
     sleep(Duration::from_millis(1000)).await;
     let addr = "localhost:3012";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
@@ -39,7 +40,7 @@ async fn main() {
 
         tokio::spawn(accept_connection(state.clone(),addr, stream));
     }
-    midiTask.abort();
+    midi_task.abort();
 }
 
 /*
@@ -53,7 +54,7 @@ async fn accept_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStrea
 async fn handle_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStream) {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
-    let (tx, rx) = unbounded_channel();
+    let (tx, _rx) = unbounded_channel();
     peer_map.lock().unwrap().insert(addr, tx);
 
     println!("New WebSocket connection: {}", addr);
@@ -69,8 +70,8 @@ async fn handle_connection(peer_map: PeerMap, addr: SocketAddr, stream: TcpStrea
 }
 
 
-fn server_send_msg_to_all_clients(msg: tokio_tungstenite::tungstenite::Message, peer_map: PeerMap){
-    let peers = peer_map.lock().unwrap();
+fn server_send_msg_to_all_clients(msg: tokio_tungstenite::tungstenite::Message, peer_map: std::sync::MutexGuard<'_, HashMap<SocketAddr, UnboundedSender<Message>>>){
+    let peers = peer_map;
 
     let broadcast_recipients = peers.iter().map(|(_, ws_sink)| ws_sink);
 
@@ -147,13 +148,13 @@ fn read_midi<'a>(peer_map:PeerMap) -> Result<(), Box<dyn Error>>{
                 _ => ()
             };
             let piano_string = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
-            println!("{} ; {:?}",piano_string , message);
-            server_send_msg_to_all_clients(tokio_tungstenite::tungstenite::Message::Text(piano_string),peer_map.clone());
+            println!("{} ; {:?}", piano_string, message);
+            server_send_msg_to_all_clients(tokio_tungstenite::tungstenite::Message::Text(piano_string),peer_map.lock().unwrap());
         }
     }, ())?;
     
     println!("Connection open, reading input from '{}' ", in_port_name);
-
+    
     input.clear();
     loop {
         stdin().read_line(&mut input)?; // wait for next enter key press
