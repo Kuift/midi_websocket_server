@@ -53,10 +53,11 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
 
     println!("New WebSocket connection: {}", addr);
     let mut old_piano_string = piano_string.lock().unwrap().clone();
-    loop{
+    let mut stay = true;
+    while stay{
         let current_piano_string = piano_string.lock().unwrap().clone();
         if old_piano_string != current_piano_string{
-            ws_stream.send(current_piano_string.clone()).await.unwrap_or_default();
+            ws_stream.send(current_piano_string.clone()).await.unwrap_or(stay = false);
             old_piano_string = current_piano_string;
         }
         sleep(Duration::from_millis(1)).await;
@@ -87,7 +88,14 @@ impl MidiCommand {
 
 async fn midi_routine(piano_string: PianoString)
 {
-    read_midi(piano_string).unwrap();
+    match read_midi(piano_string){
+        Err(e) => {
+            println!("{}\n Connect your midi port and re-execute this program.",e); 
+            let mut input = String::new();
+            stdin().read_line(&mut input).unwrap();
+        },
+        _ => (),
+    }
 }
 
 fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
@@ -138,13 +146,13 @@ fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
         }
     }, ())?;
     
-    println!("Connection open, reading input from '{}' ", in_port_name);
+    println!("Connection open, reading input from '{}'", in_port_name);
     
     input.clear();
     loop {
         stdin().read_line(&mut input)?; // wait for next enter key press
     }
 
-    println!("Closing connection");
-    Ok(())
+    //println!("Closing connection");
+    //Ok(())
 }

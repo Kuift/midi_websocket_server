@@ -11,3 +11,9 @@ futures-util = { version = "0.3", default-features = false, features = ["async-a
 tokio-tungstenite = {version = "0.15.0", default-features = false}
 tokio = { version = "1.0.0", default-features = false, features = ["io-util","io-std", "macros", "net", "rt-multi-thread", "time", "sync"] }
 midir = "0.7.0"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
