@@ -27,7 +27,7 @@ async fn main() {
     
     let midi_task = tokio::spawn(midi_routine(state.clone()));
     sleep(Duration::from_millis(1000)).await;
-    let addr = "localhost:3012";
+    let addr = "127.0.0.1:3012";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     println!("Listening on: {}", addr);
 
@@ -61,7 +61,7 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
         }
         sleep(Duration::from_millis(1)).await;
     }
-    println!("{} disconnected", addr);
+    //println!("{} disconnected", addr);
 }
 
 
@@ -71,6 +71,7 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
 enum MidiCommand{
     KeyDown(u8,u8),
     KeyUp(u8,u8),
+    Pedals(u8,u8),
     Unknown
 }
 
@@ -80,6 +81,7 @@ impl MidiCommand {
         match command[0]{
             128 => MidiCommand::KeyUp(command[1],command[2]), 
             144 => MidiCommand::KeyDown(command[1],command[2]),
+            176 => MidiCommand::Pedals(command[1],command[2]),
             _ => MidiCommand::Unknown,
         }
     }
@@ -87,14 +89,11 @@ impl MidiCommand {
 
 async fn midi_routine(piano_string: PianoString)
 {
-    match read_midi(piano_string){
-        Err(e) => {
-            println!("{}\n Connect your midi port and re-execute this program.",e); 
-            let mut input = String::new();
-            stdin().read_line(&mut input).unwrap();
-        },
-        _ => (),
-    }
+    if let Err(e) = read_midi(piano_string){
+        println!("{}\n Connect your midi port and re-execute this program.",e); 
+        let mut input = String::new();
+        stdin().read_line(&mut input).unwrap();
+    } 
 }
 
 fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
@@ -127,21 +126,27 @@ fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
     
     println!("\nOpening connection");
 
-    let mut piano_char_vec = vec![b'0'; 88];
+    let mut piano_char_vec = vec![b'0'; 90];
     
     let in_port_name = midi_in.port_name(in_port)?;
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(in_port, "midir-read-input", move |_stamp, message, _| {
         if message.len() > 1{
             let command = MidiCommand::new(message);
+            let normalize = |value:u8| {(((value as f32)/127.0*8.0) as u8).to_string().as_bytes()[0]};
             match command{
-                MidiCommand::KeyDown(key,vel) => piano_char_vec[(key-21) as usize] = (((vel as f32)/127.0*8.0+1.0) as u8).to_string().as_bytes()[0],
+                MidiCommand::KeyDown(key,vel) => piano_char_vec[(key-21) as usize] = normalize(vel)+1,
                 MidiCommand::KeyUp(key,_vel) => piano_char_vec[(key-21) as usize] = b'0',
+                MidiCommand::Pedals(pedal, vel) => match pedal{
+                    64 => piano_char_vec[88] = normalize(vel),
+                    66 => piano_char_vec[89] = normalize(vel),
+                    _ => ()
+                }
                 _ => ()
             };
             let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
             println!("{} ; {:?}", piano_string_from_array, message);
-            *piano_string.lock().unwrap() = Message::Text(piano_string_from_array).clone();
+            *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
         }
     }, ())?;
     
