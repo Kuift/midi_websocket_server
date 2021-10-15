@@ -8,8 +8,8 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
-use futures_util::SinkExt;
-use tokio::net::{TcpListener, TcpStream};
+use futures_util::{SinkExt};
+use tokio::{net::{TcpListener, TcpStream}};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio::time::{sleep, Duration};
@@ -52,16 +52,21 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
     println!("New WebSocket connection: {}", addr);
+    let mut timeout = 0;
     let mut old_piano_string = piano_string.lock().unwrap().clone();
     loop {
         let current_piano_string = piano_string.lock().unwrap().clone();
         if old_piano_string != current_piano_string{
-            ws_stream.send(current_piano_string.clone()).await.unwrap_or_default();
+            match ws_stream.send(current_piano_string.clone()).await{
+                Ok(_a) => timeout = 0,
+                Err(_a) => timeout += 1,
+            }
             old_piano_string = current_piano_string;
         }
         sleep(Duration::from_millis(1)).await;
+        if timeout >= 10 {break;} // if nothing is received for about 60 seconds, we disconnect the stream.
     }
-    //println!("{} disconnected", addr);
+    println!("{} disconnected", addr);
 }
 
 
