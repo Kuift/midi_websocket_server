@@ -89,23 +89,28 @@ impl MidiCommand {
 
 async fn midi_routine(piano_string: PianoString)
 {
-    if let Err(e) = read_midi(piano_string){
-        println!("{}\n Connect your midi port and re-execute this program.",e); 
-        let mut input = String::new();
-        stdin().read_line(&mut input).unwrap();
+    if let Err(e) = read_midi(piano_string).await {
+        println!("{}\nConnect your midi device(s) and re-execute this program.",e); 
     } 
 }
 
-fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
+async fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
     let mut input = String::new();
     
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
-    //TODO: make the port selection part into a separate function
+    
     // Get an input port (read from console if multiple are available)
+    loop {
+        if midi_in.ports().len() > 0{
+            break;
+        }
+        println!("No midi device found, connect a midi device to your computer to continue.\nRetrying in 10 seconds...");
+        sleep(Duration::from_millis(10000)).await;
+    };
     let in_ports = midi_in.ports();
     let in_port = match in_ports.len() {
-        0 => return Err("no input port found".into()),
+        0 => return Err("no midi input port found".into()),
         1 => {
             println!("Choosing the only available input port: {}", midi_in.port_name(&in_ports[0]).unwrap());
             &in_ports[0]
@@ -154,9 +159,6 @@ fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
     
     input.clear();
     loop {
-        stdin().read_line(&mut input)?; // wait for next enter key press
+        stdin().read_line(&mut input)?; //loop so that the thread doesn't stop running the callback.
     }
-
-    //println!("Closing connection");
-    //Ok(())
 }
