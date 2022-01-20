@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "sink", "std"] }
-tokio-tungstenite = {version = "0.15.0", default-features = false}
+tokio-tungstenite = {version = "0.16.1", default-features = false}
 tokio = { version = "1.0.0", default-features = false, features = ["io-util","io-std", "macros", "net", "rt-multi-thread", "time", "sync"] }
 midir = "0.7.0"
 
