@@ -173,11 +173,15 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             };
             let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
             
-            if show_binary_piano { println!("{} ; {:?}", piano_string_from_array, message);}
-            else { println!("{:?} {:x?}", message, message);}
+            if show_binary_piano { 
+                println!("{} ; {:?}", piano_string_from_array, message);
+                *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
+            }
+            else { //if a midi command that isn't supported by the binary piano is sent, then we send the raw midi data
+                println!("{:?} {:x?}", message, message);
+                *raw_midi.lock().unwrap() = Message::Text(String::from(message.to_vec().iter().map(|x| format!("{:x?}",x)).collect::<Vec<String>>().join("-")));
+            }
 
-            *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
-            *raw_midi.lock().unwrap() = Message::Text(String::from(message.to_vec().iter().map(|x| format!("{:x?}",x)).collect::<Vec<String>>().join("-")));
         }
     }, ())?;
     
