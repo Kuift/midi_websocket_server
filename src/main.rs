@@ -24,25 +24,41 @@ type PianoString = Arc<Mutex<Message>>;
 #[tokio::main]
 async fn main() {
     let state = PianoString::new(Mutex::new(Message::Text(String::from_utf8(vec![b'0'; 88]).unwrap())));
-    
-    let midi_task = tokio::spawn(midi_routine(state.clone()));
+    let midi_state = PianoString::new(Mutex::new(Message::Text(String::from("000"))));
+
+    let midi_task = tokio::spawn(midi_routine(state.clone(), midi_state.clone()));
     sleep(Duration::from_millis(1000)).await;
+
+    let addr_midi_raw = "127.0.0.1:3013";
+    let raw_midi_websocket_channel = tokio::spawn(check_for_midi_parser_websocket(midi_state, addr_midi_raw));
+
     let addr = "127.0.0.1:3012";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     println!("Listening on: {}", addr);
-
     while let Ok((stream, _)) = listener.accept().await {
         let addr = stream.peer_addr().expect("connected streams should have a peer address");
         println!("Peer address: {}", addr);
 
         tokio::spawn(accept_connection(state.clone(),addr, stream));
     }
+    raw_midi_websocket_channel.abort();
     midi_task.abort();
 }
 
 /*
 ************Web socket handling************
 */
+
+async fn check_for_midi_parser_websocket(midi_state: PianoString, addr: &str) {
+    let listener = TcpListener::bind(&addr).await.expect("Can't listen (raw)");
+    println!("RAW MIDI Listening on: {}", addr);
+    while let Ok((stream, _)) = listener.accept().await {
+        let addr = stream.peer_addr().expect("connected streams should have a peer address");
+        println!("RAW Peer address: {}", addr);
+
+        tokio::spawn(accept_connection(midi_state.clone(),addr, stream));
+    }
+}
 
 async fn accept_connection(piano_string: PianoString, addr: SocketAddr, stream: TcpStream) {
     handle_connection(piano_string, addr, stream).await; 
@@ -92,14 +108,14 @@ impl MidiCommand {
     }
 }
 
-async fn midi_routine(piano_string: PianoString)
+async fn midi_routine(piano_string: PianoString, raw_midi: PianoString)
 {
-    if let Err(e) = read_midi(piano_string).await {
+    if let Err(e) = read_midi(piano_string, raw_midi).await {
         println!("{}\nConnect your midi device(s) and re-execute this program.",e); 
     } 
 }
 
-async fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
+async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(), Box<dyn Error>>{
     let mut input = String::new();
     
     let mut midi_in = MidiInput::new("midir reading input")?;
@@ -141,9 +157,10 @@ async fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
     let in_port_name = midi_in.port_name(in_port)?;
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(in_port, "midir-read-input", move |_stamp, message, _| {
-        if message.len() > 1{
+        if message.len() > 1 {
             let command = MidiCommand::new(message);
             let normalize = |value:u8| {(((value as f32)/127.0*8.0) as u8).to_string().as_bytes()[0]};
+            let mut show_binary_piano = true;
             match command{
                 MidiCommand::KeyDown(key,vel) => piano_char_vec[(key-21) as usize] = normalize(vel)+1,
                 MidiCommand::KeyUp(key,_vel) => piano_char_vec[(key-21) as usize] = b'0',
@@ -152,11 +169,15 @@ async fn read_midi(piano_string:PianoString) -> Result<(), Box<dyn Error>>{
                     66 => piano_char_vec[89] = normalize(vel),
                     _ => ()
                 }
-                _ => ()
+                _ => show_binary_piano = false,
             };
             let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
-            println!("{} ; {:?}", piano_string_from_array, message);
+            
+            if show_binary_piano { println!("{} ; {:?}", piano_string_from_array, message);}
+            else { println!("{:?} {:x?}", message, message);}
+
             *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
+            *raw_midi.lock().unwrap() = Message::Text(String::from(message.to_vec().iter().map(|x| format!("{:x?}",x)).collect::<Vec<String>>().join("-")));
         }
     }, ())?;
     
