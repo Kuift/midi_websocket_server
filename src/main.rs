@@ -178,8 +178,8 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
                 *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
             }
             else { //if a midi command that isn't supported by the binary piano is sent, then we send the raw midi data
-                println!("{:?} {:x?}", message, message);
-                *raw_midi.lock().unwrap() = Message::Text(String::from(message.to_vec().iter().map(|x| format!("{:x?}",x)).collect::<Vec<String>>().join("-")));
+                println!("{:?} {:02x?}", message, message);
+                *raw_midi.lock().unwrap() = Message::Text(String::from(message.to_vec().iter().map(|x| format!("{:02x?}",x)).collect::<Vec<String>>().join("-")));
             }
 
         }
