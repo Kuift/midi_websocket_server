@@ -167,7 +167,7 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
                 MidiCommand::Pedals(pedal, vel) => match pedal{
                     64 => piano_char_vec[88] = normalize(vel),
                     66 => piano_char_vec[89] = normalize(vel),
-                    _ => ()
+                    _ => show_binary_piano = false
                 }
                 _ => show_binary_piano = false,
             };
