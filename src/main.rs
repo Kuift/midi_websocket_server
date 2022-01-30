@@ -162,8 +162,8 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             let normalize = |value:u8| {(((value as f32)/127.0*8.0) as u8).to_string().as_bytes()[0]};
             let mut show_binary_piano = true;
             match command{
-                MidiCommand::KeyDown(key,vel) => piano_char_vec[(key-21) as usize] = normalize(vel)+1,
-                MidiCommand::KeyUp(key,_vel) => piano_char_vec[(key-21) as usize] = b'0',
+                MidiCommand::KeyDown(key,vel) => piano_char_vec[((key-21) % 88) as usize] = normalize(vel)+1,
+                MidiCommand::KeyUp(key,_vel) => piano_char_vec[((key-21) % 88) as usize] = b'0',
                 MidiCommand::Pedals(pedal, vel) => match pedal{
                     64 => piano_char_vec[88] = normalize(vel),
                     66 => piano_char_vec[89] = normalize(vel),
