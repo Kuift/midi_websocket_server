@@ -21,9 +21,11 @@ use midir::{MidiInput, Ignore};
 
 type PianoString = Arc<Mutex<Message>>;
 
+const BINARY_PIANO_SIZE:usize = 91;
+
 #[tokio::main]
 async fn main() {
-    let state = PianoString::new(Mutex::new(Message::Text(String::from_utf8(vec![b'0'; 88]).unwrap())));
+    let state = PianoString::new(Mutex::new(Message::Text(String::from_utf8(vec![b'0'; BINARY_PIANO_SIZE]).unwrap())));
     let midi_state = PianoString::new(Mutex::new(Message::Text(String::from("000"))));
 
     let midi_task = tokio::spawn(midi_routine(state.clone(), midi_state.clone()));
@@ -90,9 +92,9 @@ async fn handle_connection(piano_string: PianoString, addr: SocketAddr, stream: 
 *************midi stuff below*************
 */
 enum MidiCommand{
-    KeyDown(u8,u8),
-    KeyUp(u8,u8),
-    Pedals(u8,u8),
+    KeyDown(u8,u8,u8), // key number, velocity, channel
+    KeyUp(u8,u8,u8),
+    Pedals(u8,u8,u8),
     Unknown
 }
 
@@ -100,9 +102,9 @@ impl MidiCommand {
     fn new(command:&[u8]) -> MidiCommand
     {
         match command[0]{
-            128 => MidiCommand::KeyUp(command[1],command[2]), 
-            144 => MidiCommand::KeyDown(command[1],command[2]),
-            176 => MidiCommand::Pedals(command[1],command[2]),
+            128..=143 => MidiCommand::KeyUp(command[1],command[2],command[0]-128), 
+            144..=159 => MidiCommand::KeyDown(command[1],command[2],command[0]-144),
+            176..=191 => MidiCommand::Pedals(command[1],command[2],command[0]-176),
             _ => MidiCommand::Unknown,
         }
     }
@@ -152,7 +154,7 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
     
     println!("\nOpening connection");
 
-    let mut piano_char_vec = vec![b'0'; 90];
+    let mut piano_char_vec = vec![[b'0'; BINARY_PIANO_SIZE]; 16];
     
     let in_port_name = midi_in.port_name(in_port)?;
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
@@ -161,19 +163,30 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             let command = MidiCommand::new(message);
             let normalize = |value:u8| {(((value as f32)/127.0*8.0) as u8).to_string().as_bytes()[0]};
             let mut show_binary_piano = true;
+            let mut midi_channel = 0;
             match command{
-                MidiCommand::KeyDown(key,vel) => piano_char_vec[((key-21) % 88) as usize] = normalize(vel)+1,
-                MidiCommand::KeyUp(key,_vel) => piano_char_vec[((key-21) % 88) as usize] = b'0',
-                MidiCommand::Pedals(pedal, vel) => match pedal{
-                    64 => piano_char_vec[88] = normalize(vel),
-                    66 => piano_char_vec[89] = normalize(vel),
-                    _ => show_binary_piano = false
-                }
+                MidiCommand::KeyDown(key,vel, channel) => {
+                    piano_char_vec[channel as usize][((key-21) % 88) as usize] = normalize(vel)+1;
+                    midi_channel = channel;
+                },
+                MidiCommand::KeyUp(key,_vel, channel) => {
+                    piano_char_vec[channel as usize][((key-21) % 88) as usize] = b'0';
+                    midi_channel = channel;
+                },
+                MidiCommand::Pedals(pedal, vel, channel) => {
+                    match pedal{
+                        64 => piano_char_vec[channel as usize][88] = normalize(vel),
+                        66 => piano_char_vec[channel as usize][89] = normalize(vel),
+                        _ => show_binary_piano = false
+                    };
+                    midi_channel = channel;
+                },
                 _ => show_binary_piano = false,
             };
-            let piano_string_from_array = String::from_utf8(piano_char_vec.clone()).expect("Error while converting u8 array to utf-8");
             
             if show_binary_piano { 
+                piano_char_vec[midi_channel as usize][90] = format!("{:x}",midi_channel).as_bytes()[0];
+                let piano_string_from_array = String::from_utf8(piano_char_vec[midi_channel as usize].to_vec()).clone().expect("Error while converting u8 array to utf-8");
                 println!("{} ; {:?}", piano_string_from_array, message);
                 *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
             }
