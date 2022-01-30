@@ -187,7 +187,7 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             if show_binary_piano { 
                 piano_char_vec[midi_channel as usize][90] = format!("{:x}",midi_channel).as_bytes()[0];
                 let piano_string_from_array = String::from_utf8(piano_char_vec[midi_channel as usize].to_vec()).clone().expect("Error while converting u8 array to utf-8");
-                //let piano_string_from_array = String::from_utf8(squash_channels(piano_char_vec).to_vec()).clone().expect("Error while converting u8 array to utf-8");
+                //let piano_string_from_array = String::from_utf8(squash_channels(piano_char_vec.to_owned()).to_vec()).clone().expect("Error while converting u8 array to utf-8");
                 println!("{} ; {:?}", piano_string_from_array, message);
                 *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
             }
