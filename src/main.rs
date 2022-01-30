@@ -187,6 +187,7 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             if show_binary_piano { 
                 piano_char_vec[midi_channel as usize][90] = format!("{:x}",midi_channel).as_bytes()[0];
                 let piano_string_from_array = String::from_utf8(piano_char_vec[midi_channel as usize].to_vec()).clone().expect("Error while converting u8 array to utf-8");
+                //let piano_string_from_array = String::from_utf8(squash_channels(piano_char_vec).to_vec()).clone().expect("Error while converting u8 array to utf-8");
                 println!("{} ; {:?}", piano_string_from_array, message);
                 *piano_string.lock().unwrap() = Message::Text(piano_string_from_array);
             }
@@ -204,4 +205,16 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
     loop {
         stdin().read_line(&mut input)?; //loop so that the thread doesn't stop running the callback.
     }
+}
+
+fn squash_channels(piano_char_vec:Vec<[u8;BINARY_PIANO_SIZE]>) -> Vec<u8>{
+    let mut result_piano = vec![b'0'; BINARY_PIANO_SIZE];
+    for piano_vec in piano_char_vec {
+        for (i, char) in piano_vec.iter().enumerate(){
+            if char == &b'1'{
+                result_piano[i] = b'1';
+            }
+        }
+    }
+    result_piano
 }
