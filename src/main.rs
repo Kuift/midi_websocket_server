@@ -167,6 +167,10 @@ async fn read_midi(piano_string:PianoString, raw_midi:PianoString) -> Result<(),
             match command{
                 MidiCommand::KeyDown(key,vel, channel) => {
                     piano_char_vec[channel as usize][((key-21) % 88) as usize] = normalize(vel)+1;
+                    if vel == 0
+                    {
+                        piano_char_vec[channel as usize][((key-21) % 88) as usize] = b'0';
+                    }
                     midi_channel = channel;
                 },
                 MidiCommand::KeyUp(key,_vel, channel) => {
